@@ -1,23 +1,25 @@
-//! Network data plane: utun device for routing + loopback alias + TCP portforward.
+//! Network data plane: TUN device for routing + loopback alias + TCP portforward.
 //!
 //! Architecture:
-//!   1. utun device + route → OS knows about cluster subnet (10.96.0.0/12)
+//!   1. TUN device + route → OS knows about cluster subnet (10.96.0.0/12)
 //!   2. DNS proxy → resolves *.svc.cluster.local → ClusterIP
 //!   3. For each known service: loopback alias on ClusterIP + TCP listener
 //!   4. TCP listener → kube-rs portforward (WebSocket) → pod
 //!
-//! No kubectl subprocess, no /etc/hosts — pure Rust, clean DNS.
+//! Supports macOS (utun), Linux (tun), and Windows (no TUN, proxies only).
 
 use anyhow::{Context, Result};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::os::unix::io::RawFd;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
+
+#[cfg(unix)]
+use std::os::unix::io::RawFd;
 
 const TUN_LOCAL_IP: &str = "198.18.0.1";
 const TUN_PEER_IP: &str = "198.18.0.2";
@@ -51,21 +53,31 @@ impl ServiceEntry {
     }
 }
 
-// ── TUN device ───────────────────────────────────────────
+// ── TUN device ──────────────────────────────────────────
 
+#[cfg(unix)]
 pub struct TunDevice {
     pub name: String,
     pub fd: RawFd,
     pub service_cidr: String,
 }
 
+#[cfg(windows)]
+pub struct TunDevice {
+    pub name: String,
+    pub service_cidr: String,
+}
+
+#[cfg(unix)]
 impl Drop for TunDevice {
     fn drop(&mut self) {
         unsafe { libc::close(self.fd); }
     }
 }
 
-/// Create a macOS utun device. Requires root.
+// ── macOS: utun via PF_SYSTEM ───────────────────────────
+
+#[cfg(target_os = "macos")]
 pub fn create_utun() -> Result<TunDevice> {
     let fd = unsafe {
         libc::socket(32 /* PF_SYSTEM */, libc::SOCK_DGRAM, 2 /* SYSPROTO_CONTROL */)
@@ -125,7 +137,62 @@ pub fn create_utun() -> Result<TunDevice> {
     Ok(TunDevice { name, fd, service_cidr: String::new() })
 }
 
-/// Configure utun: assign IP + add route for service CIDR.
+// ── Linux: TUN via /dev/net/tun ─────────────────────────
+
+#[cfg(target_os = "linux")]
+pub fn create_utun() -> Result<TunDevice> {
+    use std::os::unix::io::IntoRawFd;
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/net/tun")
+        .context("open /dev/net/tun — run with sudo or load tun kernel module")?;
+    let fd = file.into_raw_fd();
+
+    #[repr(C)]
+    struct Ifreq {
+        ifr_name: [u8; 16],
+        ifr_flags: i16,
+        _pad: [u8; 22],
+    }
+
+    const IFF_TUN: i16 = 0x0001;
+    const IFF_NO_PI: i16 = 0x1000;
+    const TUNSETIFF: u64 = 0x400454CA;
+
+    let mut ifr = Ifreq {
+        ifr_name: [0u8; 16],
+        ifr_flags: IFF_TUN | IFF_NO_PI,
+        _pad: [0u8; 22],
+    };
+    let prefix = b"portkube";
+    ifr.ifr_name[..prefix.len()].copy_from_slice(prefix);
+
+    let ret = unsafe { libc::ioctl(fd, TUNSETIFF as _, &mut ifr) };
+    if ret < 0 {
+        unsafe { libc::close(fd); }
+        anyhow::bail!("ioctl(TUNSETIFF) failed: {}", std::io::Error::last_os_error());
+    }
+
+    let name_len = ifr.ifr_name.iter().position(|&b| b == 0).unwrap_or(16);
+    let name = std::str::from_utf8(&ifr.ifr_name[..name_len])
+        .unwrap_or("portkube0").to_string();
+
+    info!(device=%name, "tun device created");
+    Ok(TunDevice { name, fd, service_cidr: String::new() })
+}
+
+// ── Windows: no TUN support ─────────────────────────────
+
+#[cfg(windows)]
+pub fn create_utun() -> Result<TunDevice> {
+    anyhow::bail!("TUN devices are not yet supported on Windows — proxies will still work via loopback")
+}
+
+// ── Configure TUN ───────────────────────────────────────
+
+#[cfg(target_os = "macos")]
 pub async fn configure_tun(tun: &mut TunDevice, service_cidr: &str) -> Result<()> {
     let dev = &tun.name;
     run_cmd("ifconfig", &[dev, "inet", TUN_LOCAL_IP, TUN_PEER_IP, "up"]).await?;
@@ -135,7 +202,26 @@ pub async fn configure_tun(tun: &mut TunDevice, service_cidr: &str) -> Result<()
     Ok(())
 }
 
-/// Cleanup: remove route, fd closed by Drop.
+#[cfg(target_os = "linux")]
+pub async fn configure_tun(tun: &mut TunDevice, service_cidr: &str) -> Result<()> {
+    let dev = &tun.name;
+    run_cmd("ip", &["addr", "add", &format!("{TUN_LOCAL_IP}/32"), "peer", TUN_PEER_IP, "dev", dev]).await?;
+    run_cmd("ip", &["link", "set", dev, "up"]).await?;
+    run_cmd("ip", &["route", "add", service_cidr, "via", TUN_PEER_IP, "dev", dev]).await?;
+    tun.service_cidr = service_cidr.to_string();
+    info!(device=%dev, cidr=%service_cidr, "tun configured");
+    Ok(())
+}
+
+#[cfg(windows)]
+pub async fn configure_tun(tun: &mut TunDevice, service_cidr: &str) -> Result<()> {
+    tun.service_cidr = service_cidr.to_string();
+    anyhow::bail!("TUN configuration is not supported on Windows")
+}
+
+// ── Cleanup TUN ─────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
 pub async fn cleanup_tun(tun: &TunDevice) {
     if !tun.service_cidr.is_empty() {
         let _ = run_cmd("route", &["delete", "-net", &tun.service_cidr, TUN_PEER_IP]).await;
@@ -143,9 +229,22 @@ pub async fn cleanup_tun(tun: &TunDevice) {
     info!(device=%tun.name, "tun cleaned up");
 }
 
+#[cfg(target_os = "linux")]
+pub async fn cleanup_tun(tun: &TunDevice) {
+    if !tun.service_cidr.is_empty() {
+        let _ = run_cmd("ip", &["route", "del", &tun.service_cidr, "via", TUN_PEER_IP]).await;
+    }
+    info!(device=%tun.name, "tun cleaned up");
+}
+
+#[cfg(windows)]
+pub async fn cleanup_tun(tun: &TunDevice) {
+    info!(device=%tun.name, "tun cleanup (no-op on Windows)");
+}
+
 // ── Loopback alias per ClusterIP ─────────────────────────
 
-/// Add a loopback alias so traffic to this ClusterIP stays local.
+#[cfg(target_os = "macos")]
 async fn add_loopback_alias(ip: Ipv4Addr) -> Result<()> {
     let ip_str = ip.to_string();
     run_cmd("ifconfig", &["lo0", "alias", &ip_str]).await?;
@@ -153,10 +252,40 @@ async fn add_loopback_alias(ip: Ipv4Addr) -> Result<()> {
     Ok(())
 }
 
-/// Remove a loopback alias.
+#[cfg(target_os = "linux")]
+async fn add_loopback_alias(ip: Ipv4Addr) -> Result<()> {
+    let ip_cidr = format!("{ip}/32");
+    run_cmd("ip", &["addr", "add", &ip_cidr, "dev", "lo"]).await?;
+    debug!(ip=%ip, "loopback alias added");
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn add_loopback_alias(ip: Ipv4Addr) -> Result<()> {
+    let ip_str = ip.to_string();
+    run_cmd("netsh", &["interface", "ip", "add", "address", "Loopback Pseudo-Interface 1", &ip_str, "255.255.255.255"]).await?;
+    debug!(ip=%ip, "loopback alias added");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 async fn remove_loopback_alias(ip: Ipv4Addr) {
     let ip_str = ip.to_string();
     let _ = run_cmd("ifconfig", &["lo0", "-alias", &ip_str]).await;
+    debug!(ip=%ip, "loopback alias removed");
+}
+
+#[cfg(target_os = "linux")]
+async fn remove_loopback_alias(ip: Ipv4Addr) {
+    let ip_cidr = format!("{ip}/32");
+    let _ = run_cmd("ip", &["addr", "del", &ip_cidr, "dev", "lo"]).await;
+    debug!(ip=%ip, "loopback alias removed");
+}
+
+#[cfg(windows)]
+async fn remove_loopback_alias(ip: Ipv4Addr) {
+    let ip_str = ip.to_string();
+    let _ = run_cmd("netsh", &["interface", "ip", "delete", "address", "Loopback Pseudo-Interface 1", &ip_str]).await;
     debug!(ip=%ip, "loopback alias removed");
 }
 

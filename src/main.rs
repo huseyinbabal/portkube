@@ -20,10 +20,13 @@ use tui::ui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Check root
-    if !nix::unistd::geteuid().is_root() {
-        eprintln!("portkube requires root privileges for network tunneling.");
+    // Check root/admin
+    if !is_elevated() {
+        eprintln!("portkube requires root/admin privileges for network tunneling.");
+        #[cfg(unix)]
         eprintln!("Run with: sudo portkube");
+        #[cfg(windows)]
+        eprintln!("Run as Administrator.");
         std::process::exit(1);
     }
 
@@ -291,6 +294,18 @@ fn handle_svc_key(app: &mut App, key: KeyCode, tx: &mpsc::Sender<AppEvent>) {
         }
         _ => {}
     }
+}
+
+#[cfg(unix)]
+fn is_elevated() -> bool {
+    nix::unistd::geteuid().is_root()
+}
+
+#[cfg(windows)]
+fn is_elevated() -> bool {
+    // Check if running as Administrator via a simple heuristic:
+    // try to read a protected system path
+    std::fs::metadata("C:\\Windows\\System32\\config\\SAM").is_ok()
 }
 
 #[cfg(test)]

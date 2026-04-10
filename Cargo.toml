@@ -1,0 +1,48 @@
+[package]
+name = "portkube"
+version = "1.0.0"
+edition = "2024"
+description = "TUI for Kubernetes local development — access cluster services from localhost"
+
+[dependencies]
+# TUI
+ratatui = "0.30"
+crossterm = "0.29"
+
+# Kubernetes
+kube = { version = "3", features = ["client", "config", "runtime", "ws"] }
+kube-runtime = "3"
+k8s-openapi = { version = "0.27", features = ["v1_32"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Clipboard & browser
+arboard = "3"
+open = "5"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Misc
+dirs = "6"
+chrono = "0.4"
+nix = { version = "0.31", features = ["net", "socket", "ioctl", "user"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http = "1"
+bytes = "1"
+http-body-util = "0.1"

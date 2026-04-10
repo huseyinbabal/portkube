@@ -1,0 +1,229 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 480" font-family="'SF Mono', 'Fira Code', 'Cascadia Code', monospace" font-size="13">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f0f1a"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="480" fill="url(#bg)" rx="12"/>
+
+  <!-- Title -->
+  <text x="450" y="38" text-anchor="middle" fill="#e0e0e0" font-size="18" font-weight="bold">
+    How portkube works
+  </text>
+  <text x="450" y="56" text-anchor="middle" fill="#666" font-size="11">
+    Transparent Kubernetes service access from localhost
+  </text>
+
+  <!-- ==================== LOCAL MACHINE ZONE ==================== -->
+  <rect x="30" y="72" width="520" height="390" rx="10" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="6,3"/>
+  <text x="46" y="92" fill="#555" font-size="11" font-weight="bold">LOCAL MACHINE</text>
+
+  <!-- Browser / App Box (y=110..170) -->
+  <rect x="60" y="110" width="180" height="60" rx="8" fill="#1e1e2e" stroke="#444" stroke-width="1" filter="url(#shadow)"/>
+  <text x="150" y="137" text-anchor="middle" fill="#cdd6f4" font-size="12" font-weight="bold">Browser / App</text>
+  <text x="150" y="155" text-anchor="middle" fill="#7f849c" font-size="10">http://nginx.default</text>
+
+  <!-- Arrow: Browser -> macOS Resolver (x=150, y=170..215) -->
+  <line x1="150" y1="170" x2="150" y2="215" stroke="#333" stroke-width="1"/>
+  <polygon points="146,212 150,220 154,212" fill="#00d4ff" opacity="0.6">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" repeatCount="indefinite"/>
+  </polygon>
+
+  <!-- Step 1 label (right of vertical arrow) -->
+  <circle cx="172" cy="192" r="10" fill="#00d4ff" opacity="0.15"/>
+  <text x="172" y="196" text-anchor="middle" fill="#00d4ff" font-size="10" font-weight="bold">1</text>
+
+  <!-- Packet dot: Browser -> Resolver -->
+  <circle r="3" fill="#00d4ff" filter="url(#softGlow)">
+    <animateMotion dur="3s" repeatCount="indefinite" begin="0s">
+      <mpath href="#path1"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <path id="path1" d="M150,170 L150,215" fill="none" stroke="none"/>
+
+  <!-- macOS Resolver Box (y=220..272) -->
+  <rect x="60" y="220" width="180" height="52" rx="8" fill="#1e1e2e" stroke="#444" stroke-width="1" filter="url(#shadow)"/>
+  <text x="150" y="243" text-anchor="middle" fill="#cdd6f4" font-size="12" font-weight="bold">macOS Resolver</text>
+  <text x="150" y="259" text-anchor="middle" fill="#7f849c" font-size="10">/etc/resolver/default</text>
+
+  <!-- DNS Proxy Box (y=220..272) -->
+  <rect x="315" y="220" width="210" height="52" rx="8" fill="#1a1a3e" stroke="#a78bfa" stroke-width="1.5" filter="url(#shadow)">
+    <animate attributeName="stroke-opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="420" y="243" text-anchor="middle" fill="#cba6ff" font-size="12" font-weight="bold">DNS Proxy</text>
+  <text x="420" y="259" text-anchor="middle" fill="#7f849c" font-size="10">127.0.0.53:53 (UDP)</text>
+
+  <!-- Arrow: Resolver -> DNS Proxy (forward, y=237) -->
+  <line x1="240" y1="237" x2="315" y2="237" stroke="#333" stroke-width="1"/>
+  <polygon points="312,233 320,237 312,241" fill="#a78bfa" opacity="0.6">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" repeatCount="indefinite" begin="0.5s"/>
+  </polygon>
+
+  <!-- Step 2 label (above forward arrow) -->
+  <circle cx="278" cy="222" r="10" fill="#a78bfa" opacity="0.15"/>
+  <text x="278" y="226" text-anchor="middle" fill="#a78bfa" font-size="10" font-weight="bold">2</text>
+
+  <!-- Packet dot: Resolver -> DNS Proxy -->
+  <circle r="3" fill="#a78bfa" filter="url(#softGlow)">
+    <animateMotion dur="3s" repeatCount="indefinite" begin="0.5s">
+      <mpath href="#path2"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" dur="3s" repeatCount="indefinite" begin="0.5s"/>
+  </circle>
+  <path id="path2" d="M240,237 L315,237" fill="none" stroke="none"/>
+
+  <!-- Arrow: DNS Proxy -> Resolver (response, y=258) -->
+  <line x1="315" y1="258" x2="240" y2="258" stroke="#333" stroke-width="1" stroke-dasharray="4,2"/>
+  <polygon points="243,254 235,258 243,262" fill="#a78bfa" opacity="0.4"/>
+
+  <!-- Step 3 label + IP on the return arrow -->
+  <circle cx="253" cy="258" r="10" fill="#a78bfa" opacity="0.15"/>
+  <text x="253" y="262" text-anchor="middle" fill="#a78bfa" font-size="10" font-weight="bold">3</text>
+  <rect x="266" y="249" width="64" height="16" rx="3" fill="#0f0f1a"/>
+  <text x="298" y="261" text-anchor="middle" fill="#cba6ff" font-size="9">10.96.0.10</text>
+
+  <!-- Loopback Alias Box (y=325..385) -->
+  <rect x="60" y="325" width="180" height="60" rx="8" fill="#1e1e2e" stroke="#444" stroke-width="1" filter="url(#shadow)"/>
+  <text x="150" y="348" text-anchor="middle" fill="#cdd6f4" font-size="12" font-weight="bold">Loopback Alias</text>
+  <text x="150" y="364" text-anchor="middle" fill="#7f849c" font-size="10">lo0: 10.96.0.10</text>
+  <text x="150" y="378" text-anchor="middle" fill="#555" font-size="9">ifconfig lo0 alias</text>
+
+  <!-- Arrow: Resolver -> Loopback (x=150, y=272..325) -->
+  <line x1="150" y1="272" x2="150" y2="325" stroke="#333" stroke-width="1"/>
+  <polygon points="146,322 150,330 154,322" fill="#00ff88" opacity="0.6">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" repeatCount="indefinite" begin="1s"/>
+  </polygon>
+
+  <!-- Step 4 label (right of vertical arrow) -->
+  <circle cx="172" cy="298" r="10" fill="#00ff88" opacity="0.15"/>
+  <text x="172" y="302" text-anchor="middle" fill="#00ff88" font-size="10" font-weight="bold">4</text>
+
+  <!-- Packet dot: Resolver -> Loopback -->
+  <circle r="3" fill="#00ff88" filter="url(#softGlow)">
+    <animateMotion dur="3s" repeatCount="indefinite" begin="1s">
+      <mpath href="#path4"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" dur="3s" repeatCount="indefinite" begin="1s"/>
+  </circle>
+  <path id="path4" d="M150,272 L150,325" fill="none" stroke="none"/>
+
+  <!-- TCP Proxy Box (y=325..385) -->
+  <rect x="315" y="325" width="210" height="60" rx="8" fill="#1a1a3e" stroke="#00ff88" stroke-width="1.5" filter="url(#shadow)">
+    <animate attributeName="stroke-opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite" begin="0.5s"/>
+  </rect>
+  <text x="420" y="348" text-anchor="middle" fill="#6ee7b7" font-size="12" font-weight="bold">TCP Proxy</text>
+  <text x="420" y="364" text-anchor="middle" fill="#7f849c" font-size="10">bind 10.96.0.10:80</text>
+  <text x="420" y="378" text-anchor="middle" fill="#555" font-size="9">kube-rs portforward</text>
+
+  <!-- Arrow: Loopback -> TCP Proxy (y=355) -->
+  <line x1="240" y1="355" x2="315" y2="355" stroke="#333" stroke-width="1"/>
+  <polygon points="312,351 320,355 312,359" fill="#00ff88" opacity="0.6">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" repeatCount="indefinite" begin="1.5s"/>
+  </polygon>
+
+  <!-- Step 5 label (above arrow) -->
+  <circle cx="278" cy="338" r="10" fill="#00ff88" opacity="0.15"/>
+  <text x="278" y="342" text-anchor="middle" fill="#00ff88" font-size="10" font-weight="bold">5</text>
+
+  <!-- Packet dot: Loopback -> TCP Proxy -->
+  <circle r="3" fill="#00ff88" filter="url(#softGlow)">
+    <animateMotion dur="3s" repeatCount="indefinite" begin="1.5s">
+      <mpath href="#path5"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" dur="3s" repeatCount="indefinite" begin="1.5s"/>
+  </circle>
+  <path id="path5" d="M240,355 L315,355" fill="none" stroke="none"/>
+
+  <!-- portkube label -->
+  <rect x="410" y="295" width="80" height="18" rx="4" fill="#a78bfa" opacity="0.15"/>
+  <text x="450" y="308" text-anchor="middle" fill="#a78bfa" font-size="9" font-weight="bold">portkube</text>
+
+  <!-- ==================== KUBERNETES ZONE ==================== -->
+  <rect x="590" y="72" width="280" height="390" rx="10" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="6,3"/>
+  <text x="606" y="92" fill="#555" font-size="11" font-weight="bold">KUBERNETES CLUSTER</text>
+
+  <!-- Arrow: TCP Proxy -> API Server (right then up to left edge of API box) -->
+  <path d="M525,355 L570,355 L570,138 L615,138" fill="none" stroke="#333" stroke-width="1"/>
+  <polygon points="612,134 620,138 612,142" fill="#f59e0b" opacity="0.6">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="3s" repeatCount="indefinite" begin="2s"/>
+  </polygon>
+
+  <!-- Step 6 label (right of vertical segment) -->
+  <circle cx="585" cy="250" r="10" fill="#f59e0b" opacity="0.15"/>
+  <text x="585" y="254" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="bold">6</text>
+
+  <!-- Packet dot: TCP Proxy -> API Server -->
+  <circle r="3" fill="#f59e0b" filter="url(#softGlow)">
+    <animateMotion dur="3s" repeatCount="indefinite" begin="2s">
+      <mpath href="#path6"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" dur="3s" repeatCount="indefinite" begin="2s"/>
+  </circle>
+  <path id="path6" d="M525,355 L570,355 L570,138 L615,138" fill="none" stroke="none"/>
+
+  <!-- K8s API Server -->
+  <rect x="615" y="110" width="230" height="56" rx="8" fill="#1e1e2e" stroke="#444" stroke-width="1" filter="url(#shadow)"/>
+  <text x="730" y="135" text-anchor="middle" fill="#cdd6f4" font-size="12" font-weight="bold">API Server</text>
+  <text x="730" y="152" text-anchor="middle" fill="#7f849c" font-size="10">WebSocket portforward</text>
+
+  <!-- Service -->
+  <rect x="615" y="195" width="230" height="56" rx="8" fill="#1e1e2e" stroke="#38bdf8" stroke-width="1" filter="url(#shadow)"/>
+  <text x="730" y="218" text-anchor="middle" fill="#7dd3fc" font-size="12" font-weight="bold">Service: nginx</text>
+  <text x="730" y="236" text-anchor="middle" fill="#7f849c" font-size="10">ClusterIP: 10.96.0.10:80</text>
+
+  <!-- Arrow: API -> Service -->
+  <line x1="730" y1="166" x2="730" y2="195" stroke="#333" stroke-width="1"/>
+
+  <!-- Pod 1 -->
+  <rect x="615" y="280" width="105" height="70" rx="8" fill="#1e1e2e" stroke="#00ff88" stroke-width="1" filter="url(#shadow)">
+    <animate attributeName="stroke-opacity" values="0.5;1;0.5" dur="1.5s" repeatCount="indefinite"/>
+  </rect>
+  <text x="667" y="305" text-anchor="middle" fill="#6ee7b7" font-size="11" font-weight="bold">Pod</text>
+  <text x="667" y="320" text-anchor="middle" fill="#7f849c" font-size="9">nginx-abc12</text>
+  <circle cx="695" cy="340" r="4" fill="#00ff88">
+    <animate attributeName="opacity" values="0.5;1;0.5" dur="1s" repeatCount="indefinite"/>
+  </circle>
+  <text x="680" y="344" text-anchor="middle" fill="#555" font-size="8">Ready</text>
+
+  <!-- Pod 2 -->
+  <rect x="740" y="280" width="105" height="70" rx="8" fill="#1e1e2e" stroke="#00ff88" stroke-width="1" filter="url(#shadow)" opacity="0.5"/>
+  <text x="792" y="305" text-anchor="middle" fill="#6ee7b7" font-size="11" font-weight="bold" opacity="0.5">Pod</text>
+  <text x="792" y="320" text-anchor="middle" fill="#7f849c" font-size="9" opacity="0.5">nginx-def34</text>
+  <circle cx="820" cy="340" r="4" fill="#00ff88" opacity="0.3"/>
+  <text x="805" y="344" text-anchor="middle" fill="#555" font-size="8" opacity="0.5">Ready</text>
+
+  <!-- Arrow: Service -> Pod -->
+  <line x1="667" y1="251" x2="667" y2="280" stroke="#333" stroke-width="1"/>
+  <polygon points="663,277 667,285 671,277" fill="#00ff88" opacity="0.5"/>
+  <line x1="792" y1="251" x2="792" y2="280" stroke="#333" stroke-width="1" opacity="0.3"/>
+
+
+  <!-- ==================== LEGEND ==================== -->
+  <g transform="translate(615, 375)">
+    <rect x="0" y="0" width="230" height="76" rx="6" fill="#111122" stroke="#333" stroke-width="1"/>
+    <text x="115" y="16" text-anchor="middle" fill="#888" font-size="10" font-weight="bold">FLOW</text>
+
+    <circle cx="16" cy="30" r="4" fill="#00d4ff"/>
+    <text x="28" y="34" fill="#666" font-size="9">1  DNS query (nginx.default)</text>
+
+    <circle cx="16" cy="44" r="4" fill="#a78bfa"/>
+    <text x="28" y="48" fill="#666" font-size="9">2-3 Resolve via portkube DNS</text>
+
+    <circle cx="16" cy="58" r="4" fill="#00ff88"/>
+    <text x="28" y="62" fill="#666" font-size="9">4-5 TCP to loopback alias</text>
+
+    <circle cx="16" cy="72" r="4" fill="#f59e0b"/>
+    <text x="28" y="76" fill="#666" font-size="9">6  Portforward to pod</text>
+  </g>
+</svg>

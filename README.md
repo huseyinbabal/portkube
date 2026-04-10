@@ -1,5 +1,9 @@
 # portkube - Access Kubernetes Services from Localhost
 
+<div align="center">
+  <img src="docs/portkube-demo.gif" alt="portkube demo" width="800" />
+</div>
+
 **portkube** is a terminal UI that lets you access Kubernetes cluster services by their DNS names from your local machine — no manual port-forwarding, no port collisions, no cluster-side agents.
 
 Just run `sudo portkube`, pick a context, and `http://nginx.default` works in your browser.

@@ -37,7 +37,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Misc
 dirs = "6"
 chrono = "0.4"
-nix = { version = "0.30", features = ["net", "socket", "ioctl", "user"] }
+nix = { version = "0.31", features = ["net", "socket", "ioctl", "user"] }
 libc = "0.2"
 
 [dev-dependencies]

@@ -7,7 +7,7 @@ description = "TUI for Kubernetes local development — access cluster services 
 [dependencies]
 # TUI
 ratatui = "0.29"
-crossterm = "0.28"
+crossterm = "0.29"
 
 # Kubernetes
 kube = { version = "1", features = ["client", "config", "runtime", "ws"] }

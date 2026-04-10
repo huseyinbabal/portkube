@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "Bash(gh api:*)",
+      "Bash(cargo test:*)",
+      "Bash(CARGO_TARGET_DIR=/tmp/portkube-target cargo test:*)"
+    ]
+  }
+}

@@ -3,7 +3,8 @@
 //!
 //! Example: `nginx.default` → 10.96.64.132
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use std::io;
 use std::net::Ipv4Addr;
 use tokio::net::UdpSocket;
 use tracing::{debug, info, warn};
@@ -124,9 +125,16 @@ pub async fn start_dns_proxy_with_map(
     service_map: ServiceMap,
     namespaces: Vec<String>,
 ) -> Result<tokio::task::JoinHandle<()>> {
-    let sock = UdpSocket::bind(DNS_LISTEN_ADDR)
-        .await
-        .with_context(|| format!("bind DNS on {DNS_LISTEN_ADDR}"))?;
+    let sock = match UdpSocket::bind(DNS_LISTEN_ADDR).await {
+        Ok(s) => s,
+        Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
+            return Err(anyhow!(
+                "{DNS_LISTEN_ADDR} is already in use — another portkube process is likely running. \
+                 Run `sudo pkill portkube` to clean it up, then try again."
+            ));
+        }
+        Err(e) => return Err(e).with_context(|| format!("bind DNS on {DNS_LISTEN_ADDR}")),
+    };
 
     info!("DNS proxy listening on {DNS_LISTEN_ADDR}");
 
@@ -211,6 +219,8 @@ mod tests {
                 name: "nginx".into(),
                 namespace: "default".into(),
                 port: 80,
+                target_port: Some(80),
+                target_port_name: None,
                 cluster_ip: ip,
             }],
         );
@@ -221,6 +231,8 @@ mod tests {
                 name: "api".into(),
                 namespace: "prod".into(),
                 port: 8080,
+                target_port: Some(8080),
+                target_port_name: None,
                 cluster_ip: ip2,
             }],
         );

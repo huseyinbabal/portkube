@@ -592,6 +592,8 @@ mod tests {
             name: "nginx".into(),
             namespace: "default".into(),
             port: 80,
+            target_port: Some(80),
+            target_port_name: None,
             cluster_ip: std::net::Ipv4Addr::new(10, 96, 0, 10),
         }];
         app

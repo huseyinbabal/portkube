@@ -1,6 +1,7 @@
 use anyhow::Result;
 use kube::config::Kubeconfig;
 use serde::Serialize;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct KubeContext {
@@ -11,10 +12,40 @@ pub struct KubeContext {
     pub is_active: bool,
 }
 
-/// Read all contexts from ~/.kube/config
+/// Read all contexts, honoring the `KUBECONFIG` env var and falling back to `~/.kube/config`.
 pub fn list_contexts() -> Result<Vec<KubeContext>> {
-    let kubeconfig = Kubeconfig::read()?;
+    let kubeconfig = load_kubeconfig()?;
     Ok(contexts_from_kubeconfig(&kubeconfig))
+}
+
+fn load_kubeconfig() -> Result<Kubeconfig> {
+    if let Some(cfg) = Kubeconfig::from_env()? {
+        return Ok(cfg);
+    }
+    if let Some(path) = sudo_user_kubeconfig_path() {
+        if path.exists() {
+            return Ok(Kubeconfig::read_from(path)?);
+        }
+    }
+    Ok(Kubeconfig::read()?)
+}
+
+/// When invoked via `sudo`, `$HOME` points at root's home and `KUBECONFIG`
+/// has been stripped from the environment. Recover the invoking user's
+/// `~/.kube/config` from `SUDO_USER` so the common case "just works".
+#[cfg(unix)]
+fn sudo_user_kubeconfig_path() -> Option<PathBuf> {
+    let sudo_user = std::env::var("SUDO_USER").ok()?;
+    if sudo_user == "root" {
+        return None;
+    }
+    let user = nix::unistd::User::from_name(&sudo_user).ok().flatten()?;
+    Some(user.dir.join(".kube").join("config"))
+}
+
+#[cfg(not(unix))]
+fn sudo_user_kubeconfig_path() -> Option<PathBuf> {
+    None
 }
 
 /// Extract contexts from a parsed Kubeconfig (testable without filesystem).
@@ -152,7 +183,7 @@ mod tests {
 
 /// Build a kube::Client for the given context name
 pub async fn client_for_context(name: &str) -> Result<kube::Client> {
-    let kubeconfig = Kubeconfig::read()?;
+    let kubeconfig = load_kubeconfig()?;
     let opts = kube::config::KubeConfigOptions {
         context: Some(name.into()),
         ..Default::default()

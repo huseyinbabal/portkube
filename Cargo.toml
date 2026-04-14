@@ -1,6 +1,6 @@
 [package]
 name = "portkube"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license = "MIT"
 description = "TUI for Kubernetes local development — access cluster services from localhost"

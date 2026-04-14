@@ -33,7 +33,14 @@ pub type ServiceMap = Arc<RwLock<HashMap<Ipv4Addr, Vec<ServiceEntry>>>>;
 pub struct ServiceEntry {
     pub name: String,
     pub namespace: String,
+    /// Service port — what we expose locally on the loopback alias.
     pub port: u16,
+    /// Pod containerPort to forward to. May differ from `port` (e.g. svc 80 → pod 8081).
+    /// `None` means the service uses a named targetPort and we must resolve it
+    /// against the backing pod's containerPorts at proxy start time.
+    pub target_port: Option<u16>,
+    /// Named targetPort (e.g. "http"), used only when `target_port` is `None`.
+    pub target_port_name: Option<String>,
     pub cluster_ip: Ipv4Addr,
 }
 
@@ -301,8 +308,9 @@ pub async fn cleanup_aliases(ips: &[Ipv4Addr]) {
 
 // ── Pod resolution ───────────────────────────────────────
 
-/// Find a ready pod backing a service via its label selector.
-async fn resolve_pod(client: &kube::Client, ns: &str, svc_name: &str) -> Result<String> {
+/// Find a ready pod backing a service via its label selector. Returns the full Pod
+/// so callers can also inspect `containerPorts` for named-targetPort resolution.
+async fn resolve_pod(client: &kube::Client, ns: &str, svc_name: &str) -> Result<Pod> {
     let svc_api: Api<k8s_openapi::api::core::v1::Service> =
         Api::namespaced(client.clone(), ns);
     let svc = svc_api.get(svc_name).await.context("get service")?;
@@ -320,19 +328,45 @@ async fn resolve_pod(client: &kube::Client, ns: &str, svc_name: &str) -> Result<
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), ns);
     let pods = pod_api.list(&ListParams::default().labels(&label_sel)).await?;
 
-    for pod in &pods.items {
-        if let Some(status) = &pod.status {
-            let ready = status.conditions.as_ref()
-                .map(|c| c.iter().any(|c| c.type_ == "Ready" && c.status == "True"))
-                .unwrap_or(false);
-            if ready {
-                if let Some(name) = &pod.metadata.name {
-                    return Ok(name.clone());
+    for pod in pods.items {
+        let ready = pod
+            .status
+            .as_ref()
+            .and_then(|s| s.conditions.as_ref())
+            .map(|c| c.iter().any(|c| c.type_ == "Ready" && c.status == "True"))
+            .unwrap_or(false);
+        if ready && pod.metadata.name.is_some() {
+            return Ok(pod);
+        }
+    }
+    anyhow::bail!("no ready pods for service {svc_name}")
+}
+
+/// Resolve a service targetPort against a backing pod's containerPorts.
+/// Returns the numeric pod port to forward to.
+fn resolve_target_port(pod: &Pod, entry: &ServiceEntry) -> Result<u16> {
+    if let Some(p) = entry.target_port {
+        return Ok(p);
+    }
+    let name = entry.target_port_name.as_deref().ok_or_else(|| {
+        anyhow::anyhow!("service {} has no targetPort", entry.name)
+    })?;
+
+    let containers = pod
+        .spec
+        .as_ref()
+        .map(|s| s.containers.as_slice())
+        .unwrap_or(&[]);
+    for c in containers {
+        if let Some(ports) = &c.ports {
+            for p in ports {
+                if p.name.as_deref() == Some(name) {
+                    return Ok(p.container_port as u16);
                 }
             }
         }
     }
-    anyhow::bail!("no ready pods for service {svc_name}")
+    anyhow::bail!("targetPort name '{name}' not found on pod for service {}", entry.name)
 }
 
 // ── TCP portforward listener ─────────────────────────────
@@ -351,15 +385,17 @@ pub async fn start_service_proxy(
     // Add loopback alias so we can bind on this ClusterIP
     add_loopback_alias(ip).await?;
 
-    // Resolve backing pod
-    let pod_name = resolve_pod(client, &ns, &svc).await?;
+    // Resolve backing pod and target port (handles named targetPorts like "http")
+    let pod = resolve_pod(client, &ns, &svc).await?;
+    let pod_name = pod.metadata.name.clone().unwrap_or_default();
+    let target_port = resolve_target_port(&pod, entry)?;
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &ns);
 
     let bind_addr = format!("{ip}:{port}");
     let listener = TcpListener::bind(&bind_addr).await
         .with_context(|| format!("bind {bind_addr}"))?;
 
-    info!(addr=%bind_addr, svc=%svc, pod=%pod_name, "proxy listening");
+    info!(addr=%bind_addr, svc=%svc, pod=%pod_name, target_port, "proxy listening");
 
     let handle = tokio::spawn(async move {
         loop {
@@ -372,11 +408,11 @@ pub async fn start_service_proxy(
             let pod_name = pod_name.clone();
 
             tokio::spawn(async move {
-                let mut pf = match pod_api.portforward(&pod_name, &[port]).await {
+                let mut pf = match pod_api.portforward(&pod_name, &[target_port]).await {
                     Ok(pf) => pf,
                     Err(e) => { error!(error=%e, "portforward failed"); return; }
                 };
-                if let Some(mut upstream) = pf.take_stream(port) {
+                if let Some(mut upstream) = pf.take_stream(target_port) {
                     let _ = tokio::io::copy_bidirectional(&mut tcp, &mut upstream).await;
                 }
             });
@@ -450,10 +486,16 @@ pub fn build_service_map(services: &[crate::kube::services::KubeService]) -> Ser
             _ => continue,
         };
         for sp in &svc.ports {
+            let (target_port, target_port_name) = match sp.target_port.parse::<u16>() {
+                Ok(p) => (Some(p), None),
+                Err(_) => (None, Some(sp.target_port.clone())),
+            };
             map.entry(ip).or_default().push(ServiceEntry {
                 name: svc.name.clone(),
                 namespace: svc.namespace.clone(),
                 port: sp.port as u16,
+                target_port,
+                target_port_name,
                 cluster_ip: ip,
             });
         }
@@ -490,6 +532,8 @@ mod tests {
             name: name.into(),
             namespace: ns.into(),
             port,
+            target_port: Some(port),
+            target_port_name: None,
             cluster_ip: Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]),
         }
     }

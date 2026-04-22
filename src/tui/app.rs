@@ -111,6 +111,10 @@ pub struct App {
 
     // Toast
     pub toast: Option<Toast>,
+
+    // Filter (services screen)
+    pub filter_text: String,
+    pub filter_active: bool,
 }
 
 impl App {
@@ -133,7 +137,29 @@ impl App {
             bg_handles: vec![],
             splash: SplashState::new(),
             toast: None,
+            filter_text: String::new(),
+            filter_active: false,
         }
+    }
+
+    /// Indices into `self.services` matching the current filter.
+    /// Empty filter returns all indices in order.
+    pub fn filtered_service_indices(&self) -> Vec<usize> {
+        if self.filter_text.is_empty() {
+            return (0..self.services.len()).collect();
+        }
+        let q = self.filter_text.to_lowercase();
+        self.services
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                s.name.to_lowercase().contains(&q)
+                    || s.namespace.to_lowercase().contains(&q)
+                    || s.service_type.to_lowercase().contains(&q)
+                    || s.ports_display().to_lowercase().contains(&q)
+            })
+            .map(|(i, _)| i)
+            .collect()
     }
 
     // ── Async actions ────────────────────────────────────
@@ -245,7 +271,9 @@ impl App {
     }
 
     fn selected_url(&self) -> Option<String> {
-        let svc = self.services.get(self.svc_selected)?;
+        let filtered = self.filtered_service_indices();
+        let actual = *filtered.get(self.svc_selected)?;
+        let svc = self.services.get(actual)?;
         let entry = self
             .service_entries
             .iter()

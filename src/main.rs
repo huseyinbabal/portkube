@@ -30,6 +30,8 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    init_logging();
+
     // Clean up any leftovers from a previous crash
     let _ = network::resolver::uninstall().await;
 
@@ -237,19 +239,46 @@ fn handle_ctx_key(app: &mut App, key: KeyCode, tx: &mpsc::Sender<AppEvent>) {
 }
 
 fn handle_svc_key(app: &mut App, key: KeyCode, tx: &mpsc::Sender<AppEvent>) {
+    if app.filter_active {
+        match key {
+            KeyCode::Enter => app.filter_active = false,
+            KeyCode::Esc => {
+                app.filter_text.clear();
+                app.filter_active = false;
+                app.svc_selected = 0;
+            }
+            KeyCode::Backspace => {
+                app.filter_text.pop();
+                app.svc_selected = 0;
+            }
+            KeyCode::Char(c) => {
+                app.filter_text.push(c);
+                app.svc_selected = 0;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    let visible = app.filtered_service_indices().len();
+
     match key {
         KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('/') => {
+            app.filter_active = true;
+            app.svc_selected = 0;
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             app.svc_selected = app.svc_selected.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if app.svc_selected + 1 < app.services.len() {
+            if app.svc_selected + 1 < visible {
                 app.svc_selected += 1;
             }
         }
         KeyCode::Home | KeyCode::Char('g') => app.svc_selected = 0,
         KeyCode::End | KeyCode::Char('G') => {
-            app.svc_selected = app.services.len().saturating_sub(1);
+            app.svc_selected = visible.saturating_sub(1);
         }
         KeyCode::Enter | KeyCode::Char('o') => app.open_in_browser(),
         KeyCode::Char('y') => app.copy_url(),
@@ -289,11 +318,32 @@ fn handle_svc_key(app: &mut App, key: KeyCode, tx: &mpsc::Sender<AppEvent>) {
             app.connected_context = None;
             app.tun_device_name = None;
             app.service_cidr = None;
+            app.filter_text.clear();
+            app.filter_active = false;
+            app.svc_selected = 0;
             app.screen = Screen::Contexts;
             app.show_toast("Disconnected", false);
         }
         _ => {}
     }
+}
+
+fn init_logging() {
+    let path = std::env::var("PORTKUBE_LOG").unwrap_or_else(|_| "/tmp/portkube.log".into());
+    let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    else {
+        return;
+    };
+    let filter = tracing_subscriber::EnvFilter::try_from_env("PORTKUBE_LOG_LEVEL")
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("portkube=info"));
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::sync::Mutex::new(file))
+        .with_env_filter(filter)
+        .with_ansi(false)
+        .try_init();
 }
 
 #[cfg(unix)]

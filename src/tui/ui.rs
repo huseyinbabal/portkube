@@ -388,6 +388,33 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    // Reserve a single line above the table for the filter prompt when active
+    // or non-empty. Keeps the table layout stable when filter is unused.
+    let show_filter = app.filter_active || !app.filter_text.is_empty();
+    let (filter_area, table_area) = if show_filter {
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, area)
+    };
+
+    if let Some(area) = filter_area {
+        let cursor = if app.filter_active { "_" } else { "" };
+        let style = if app.filter_active {
+            Style::default().fg(YELLOW).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(FG)
+        };
+        let line = Line::from(vec![
+            Span::styled("  /", style),
+            Span::styled(app.filter_text.clone(), style),
+            Span::styled(cursor, style),
+        ]);
+        f.render_widget(Paragraph::new(line), area);
+    }
+
+    let visible: Vec<usize> = app.filtered_service_indices();
+
     let header = Row::new(vec![
         Cell::from("  Service"),
         Cell::from("Namespace"),
@@ -400,11 +427,11 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
     .height(1)
     .bottom_margin(1);
 
-    let rows: Vec<Row> = app
-        .services
+    let rows: Vec<Row> = visible
         .iter()
         .enumerate()
-        .map(|(i, svc)| {
+        .map(|(row_idx, &svc_idx)| {
+            let svc = &app.services[svc_idx];
             let entry = app
                 .service_entries
                 .iter()
@@ -426,7 +453,7 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
                 _ => DIM,
             };
 
-            let style = if i == app.svc_selected {
+            let style = if row_idx == app.svc_selected {
                 Style::default().bg(SELECTED_BG).fg(FG)
             } else {
                 Style::default().fg(FG)
@@ -454,15 +481,21 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
+    let title = if show_filter {
+        format!(" Services ({}/{}) ", visible.len(), app.services.len())
+    } else {
+        " Services ".to_string()
+    };
+
     let table = Table::new(
         rows,
         [
-            Constraint::Min(20),
-            Constraint::Min(14),
-            Constraint::Min(14),
-            Constraint::Min(14),
-            Constraint::Min(22),
-            Constraint::Min(12),
+            Constraint::Fill(2),    // Service — long helm names need room
+            Constraint::Length(20), // Namespace
+            Constraint::Length(14), // Type
+            Constraint::Length(18), // Ports
+            Constraint::Fill(1),    // DNS — short svc.ns form
+            Constraint::Length(12), // Status
         ],
     )
     .header(header)
@@ -470,14 +503,16 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(BORDER))
-            .title(Span::styled(" Services ", Style::default().fg(FG).bold())),
+            .title(Span::styled(title, Style::default().fg(FG).bold())),
     )
     .row_highlight_style(Style::default().bg(SELECTED_BG))
     .highlight_symbol("▸ ");
 
     let mut state = ratatui::widgets::TableState::default();
-    state.select(Some(app.svc_selected));
-    f.render_stateful_widget(table, area, &mut state);
+    if !visible.is_empty() {
+        state.select(Some(app.svc_selected.min(visible.len() - 1)));
+    }
+    f.render_stateful_widget(table, table_area, &mut state);
 }
 
 // ── Status bar ───────────────────────────────────────────
@@ -503,19 +538,31 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
             ]
         }
         Screen::Services => {
-            vec![
-                key_span("↑↓", "navigate"),
-                sep(),
-                key_span("Enter/o", "open browser"),
-                sep(),
-                key_span("y", "copy url"),
-                sep(),
-                key_span("r", "refresh"),
-                sep(),
-                key_span("Esc", "disconnect"),
-                sep(),
-                key_span("q", "quit"),
-            ]
+            if app.filter_active {
+                vec![
+                    key_span("type", "filter"),
+                    sep(),
+                    key_span("Enter", "apply"),
+                    sep(),
+                    key_span("Esc", "clear"),
+                ]
+            } else {
+                vec![
+                    key_span("↑↓", "navigate"),
+                    sep(),
+                    key_span("Enter/o", "open browser"),
+                    sep(),
+                    key_span("y", "copy url"),
+                    sep(),
+                    key_span("/", "filter"),
+                    sep(),
+                    key_span("r", "refresh"),
+                    sep(),
+                    key_span("Esc", "disconnect"),
+                    sep(),
+                    key_span("q", "quit"),
+                ]
+            }
         }
     };
 

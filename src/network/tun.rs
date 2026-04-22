@@ -385,17 +385,21 @@ pub async fn start_service_proxy(
     // Add loopback alias so we can bind on this ClusterIP
     add_loopback_alias(ip).await?;
 
-    // Resolve backing pod and target port (handles named targetPorts like "http")
+    // Resolve once at startup to fail fast if no ready pod / bad targetPort.
+    // The pod name is re-resolved per connection so deployment rollouts,
+    // OOM kills and evictions don't leave the proxy pointing at a dead pod.
     let pod = resolve_pod(client, &ns, &svc).await?;
-    let pod_name = pod.metadata.name.clone().unwrap_or_default();
-    let target_port = resolve_target_port(&pod, entry)?;
+    let initial_target_port = resolve_target_port(&pod, entry)?;
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &ns);
 
     let bind_addr = format!("{ip}:{port}");
     let listener = TcpListener::bind(&bind_addr).await
         .with_context(|| format!("bind {bind_addr}"))?;
 
-    info!(addr=%bind_addr, svc=%svc, pod=%pod_name, target_port, "proxy listening");
+    info!(addr=%bind_addr, svc=%svc, target_port=initial_target_port, "proxy listening");
+
+    let entry = entry.clone();
+    let client = client.clone();
 
     let handle = tokio::spawn(async move {
         loop {
@@ -405,15 +409,40 @@ pub async fn start_service_proxy(
             };
 
             let pod_api = pod_api.clone();
-            let pod_name = pod_name.clone();
+            let entry = entry.clone();
+            let client = client.clone();
+            let svc = svc.clone();
+            let ns = ns.clone();
 
             tokio::spawn(async move {
+                let pod = match resolve_pod(&client, &ns, &svc).await {
+                    Ok(p) => p,
+                    Err(e) => { error!(svc=%svc, error=%e, "resolve pod failed"); return; }
+                };
+                let pod_name = match pod.metadata.name.as_deref() {
+                    Some(n) => n.to_string(),
+                    None => { error!(svc=%svc, "resolved pod has no name"); return; }
+                };
+                let target_port = match resolve_target_port(&pod, &entry) {
+                    Ok(p) => p,
+                    Err(e) => { error!(svc=%svc, error=%e, "resolve targetPort failed"); return; }
+                };
+
                 let mut pf = match pod_api.portforward(&pod_name, &[target_port]).await {
                     Ok(pf) => pf,
-                    Err(e) => { error!(error=%e, "portforward failed"); return; }
+                    Err(e) => {
+                        error!(svc=%svc, pod=%pod_name, target_port, error=%e, "portforward failed");
+                        return;
+                    }
                 };
-                if let Some(mut upstream) = pf.take_stream(target_port) {
-                    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut upstream).await;
+                match pf.take_stream(target_port) {
+                    Some(mut upstream) => {
+                        let _ = tokio::io::copy_bidirectional(&mut tcp, &mut upstream).await;
+                    }
+                    None => {
+                        error!(svc=%svc, pod=%pod_name, target_port,
+                            "portforward returned no stream — pod likely doesn't expose this containerPort");
+                    }
                 }
             });
         }
